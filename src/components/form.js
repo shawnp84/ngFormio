@@ -1,4 +1,5 @@
 var fs = require('fs');
+var isEmpty = require('lodash/isEmpty');
 var GridUtils = require('../factories/GridUtils')();
 
 module.exports = function(app) {
@@ -10,7 +11,7 @@ module.exports = function(app) {
         template: 'formio/components/form.html',
         group: 'advanced',
         settings: {
-          clearOnHide: false,
+          clearOnHide: true,
           input: true,
           tableView: true,
           key: 'formField',
@@ -35,8 +36,10 @@ module.exports = function(app) {
             $timeout
           ) {
             $scope.options = $scope.options || {};
-            var baseUrl = $scope.options.baseUrl || Formio.getBaseUrl();
-            $scope.componentSubmission = $scope.data[$scope.component.key] || {data: {}};
+            var baseUrl = Formio.setScopeBase($scope);
+            if (!$scope.data[$scope.component.key]) {
+              $scope.data[$scope.component.key] = {data: {}};
+            }
 
             var loadForm = function() {
               if (!$scope.component.form) {
@@ -57,8 +60,14 @@ module.exports = function(app) {
               }
 
               if ($scope.data[$scope.component.key] && $scope.data[$scope.component.key]._id) {
-                url += '/submission/' + $scope.data[$scope.component.key]._id;
+                // Submission url should refer to the submission's form.
+                $scope.submissionFormio = new Formio($scope.formio.formsUrl + '/' + $scope.data[$scope.component.key].form + '/submission/' + $scope.data[$scope.component.key]._id, {base: baseUrl});
               }
+              else {
+                // Submission url is the same as the form url.
+                $scope.submissionFormio = new Formio(url, {base: baseUrl});
+              }
+              $scope.url = url;
 
               $scope.formFormio = new Formio(url, {base: baseUrl});
               if ($scope.formFormio.formId) {
@@ -80,12 +89,12 @@ module.exports = function(app) {
 
               // See if we need to load the submission into scope.
               if (
-                $scope.formFormio.submissionId &&
+                $scope.submissionFormio.submissionId &&
                 $scope.data[$scope.component.key] &&
                 $scope.data[$scope.component.key]._id &&
-                !$scope.data[$scope.component.key].data
+                isEmpty($scope.data[$scope.component.key].data)
               ) {
-                $scope.formFormio.loadSubmission().then(function(submission) {
+                $scope.submissionFormio.loadSubmission().then(function(submission) {
                   if (!submission) {
                     return;
                   }
@@ -96,7 +105,7 @@ module.exports = function(app) {
             };
 
             var submitForm = function(scope, cb) {
-              var submission = angular.copy($scope.componentSubmission);
+              var submission = angular.copy($scope.data[$scope.component.key]);
 
               // Only save if we have provided data.
               if (angular.equals(submission, {})) {
@@ -111,7 +120,7 @@ module.exports = function(app) {
                 components = scope.form.components;
               }
               if (FormioUtils.getComponent(components, $scope.component.key)) {
-                $scope.formFormio.saveSubmission(submission).then(function(sub) {
+                $scope.submissionFormio.saveSubmission(submission).then(function(sub) {
                   if (!$scope.data[$scope.component.key]) {
                     $scope.data[$scope.component.key] = {data: {}};
                   }
@@ -156,11 +165,14 @@ module.exports = function(app) {
               if (!submission) {
                 return;
               }
-              angular.merge($scope.componentSubmission, submission);
+              angular.merge($scope.data[$scope.component.key], submission);
             }, true);
           }
         ],
-        tableView: GridUtils.generic
+        tableView: function(data, options) {
+          // Include only form data.
+          return data ? GridUtils.generic(data.data, options) : '';
+        }
       });
     }
   ]);

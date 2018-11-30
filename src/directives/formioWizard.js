@@ -1,5 +1,6 @@
-var isNaN = require('lodash/isNAN');
+var isNaN = require('lodash/isNaN');
 var isFinite = require('lodash/isFinite');
+var isEmpty = require('lodash/isEmpty');
 
 module.exports = function() {
   return {
@@ -69,12 +70,39 @@ module.exports = function() {
         $timeout
       ) {
         $scope.options = $scope.options || {};
-        $scope.baseUrl = $scope.options.baseurl || Formio.getBaseUrl();
+        Formio.setScopeBase($scope);
         var session = ($scope.storage && !$scope.readOnly) ? localStorage.getItem($scope.storage) : false;
         if (session) {
           session = angular.fromJson(session);
         }
 
+        var storedData = {};
+        var storage = {
+          getItem: function(key) {
+            if ($scope.options.noStorage) {
+              return storedData[key];
+            }
+            try {
+              var value = localStorage.getItem(key);
+              return value ? JSON.parse(value) : false;
+            }
+            catch (err) {
+              console.warn('error parsing json from localstorage', err);
+            }
+          },
+          setItem: function(key, value) {
+            if ($scope.options.noStorage) {
+              storedData[key] = value;
+              return;
+            }
+            if (typeof value !== 'string') {
+              value = JSON.stringify(value);
+            }
+            localStorage.setItem(key, value);
+          }
+        };
+
+        var session = ($scope.storage && !$scope.readOnly) ? storage.getItem($scope.storage) : false;
         $scope.formio = null;
         $scope.url = $scope.url || $scope.src;
         $scope.page = {};
@@ -116,12 +144,30 @@ module.exports = function() {
               $scope.clear();
             }
 
+            // Handle Local Storage Definition
             if ($scope.storage && !$scope.readOnly) {
-              localStorage.setItem($scope.storage, angular.toJson({
-                page: $scope.currentPage,
-                data: $scope.submission.data
-              }));
+              // If there is no localStorage object - make a new object schema
+              if (!storage.getItem($scope.storage)) {
+                storage.setItem($scope.storage, {
+                  page: $scope.currentPage,
+                  data: $scope.submission.data
+                });
+              }
+
+              // if there is a localStorage object && submission.data is blank then bind localStorage to $scope
+              if(storage.getItem($scope.storage) && isEmpty($scope.submission.data) == true){
+                $scope.submission.data = storage.getItem($scope.storage).data;
+              }
+
+              // if there is a localStorage object | && it is data | merge the two
+              if(storage.getItem($scope.storage) && isEmpty($scope.submission.data) == false){
+                storage.setItem($scope.storage, {
+                  page: $scope.currentPage,
+                  data: $scope.submission.data
+                });
+              }
             }
+
 
             $scope.page.components = $scope.pages[$scope.currentPage].components;
             $scope.activePage = $scope.pages[$scope.currentPage];
@@ -163,7 +209,7 @@ module.exports = function() {
 
         $scope.clear = function() {
           if ($scope.storage && !$scope.readOnly) {
-            localStorage.setItem($scope.storage, '');
+            storage.setItem($scope.storage, '');
           }
           $scope.submission = {data: {}};
           $scope.currentPage = 0;
@@ -310,7 +356,7 @@ module.exports = function() {
 
             var onDone = function(submission) {
               if ($scope.storage && !$scope.readOnly) {
-                localStorage.setItem($scope.storage, '');
+                storage.setItem($scope.storage, '');
               }
               $scope.showAlerts({
                 type: 'success',
@@ -337,14 +383,19 @@ module.exports = function() {
         };
 
         $scope.cancel = function() {
-          $scope.clear();
-          FormioUtils.alter('cancel', $scope, function(err) {
-            if (err) {
-              return this.showAlerts(err.alerts);
-            }
-            showPage(true);
-            $scope.$emit('cancel');
-          }.bind(this));
+          if(confirm('Are you sure you want to cancel?')){
+            $scope.clear();
+            FormioUtils.alter('cancel', $scope, function(err) {
+              if (err) {
+                return this.showAlerts(err.alerts);
+              }
+              showPage(true);
+              $scope.$emit('cancel');
+            }.bind(this));
+          }
+          else {
+            return;
+          }
         };
 
         $scope.pageHasErrors = {};
@@ -414,6 +465,7 @@ module.exports = function() {
         $scope.next = function() {
           var errors = $scope.checkErrors();
           if (errors) {
+            $scope.$emit('formError');
             $scope.pageHasErrors[$scope.currentPage] = true;
             if (!$scope.formioOptions.wizardFreeNavigation) {
               return;
@@ -445,17 +497,8 @@ module.exports = function() {
 
         // Move onto the previous page.
         $scope.prev = function() {
-          var errors = $scope.checkErrors();
-          if (errors) {
-            $scope.pageHasErrors[$scope.currentPage] = true;
-            if (!$scope.formioOptions.wizardFreeNavigation) {
-              return;
-            }
-          }
-          else {
-            $scope.pageHasErrors[$scope.currentPage] = false;
-          }
-
+          // var errors = $scope.checkErrors();
+          $scope.pageHasErrors[$scope.currentPage] = false;
           var prev = $scope.history.pop();
           $scope.currentPage = prev;
           FormioUtils.alter('prevPage', $scope, function(err) {

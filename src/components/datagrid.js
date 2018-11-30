@@ -1,5 +1,5 @@
 var fs = require('fs');
-var formioUtils = require('formiojs/utils');
+var formioUtils = require('formiojs/utils').default;
 
 module.exports = function(app) {
   app.config([
@@ -9,13 +9,13 @@ module.exports = function(app) {
         title: 'Data Grid',
         template: 'formio/components/datagrid.html',
         group: 'advanced',
-        tableView: function(data, component, $interpolate, componentInfo, tableChild) {
+        tableView: function(data, options) {
           var view = '<table class="table table-striped table-bordered table-child">';
 
-          if (!tableChild) {
+          if (!options.tableChild) {
             view += '<thead><tr>';
-            angular.forEach(component.components, function(component) {
-              view += '<th>' + (component.label || '') + ' (' + component.key + ')</th>';
+            angular.forEach(options.component.components, function(component) {
+              view += '<th>' + (component.label || '( '+component.key+')')+'</th>';
             });
             view += '</tr></thead>';
           }
@@ -23,24 +23,27 @@ module.exports = function(app) {
           view += '<tbody>';
           angular.forEach(data, function(row) {
             view += '<tr>';
-            formioUtils.eachComponent(component.components, function(component) {
-              // Don't render disabled fields, or fields with undefined data.
-              if (!component.tableView || row[component.key] === undefined) {
-                return;
-              }
-
+            formioUtils.eachComponent(options.component.components, function(component) {
               // If the component has a defined tableView, use that, otherwise try and use the raw data as a string.
-              var info = componentInfo.components.hasOwnProperty(component.type) ? componentInfo.components[component.type] : {};
+              var info = options.componentInfo.components.hasOwnProperty(component.type)
+                ? options.componentInfo.components[component.type]
+                : {};
               if (info.tableView) {
                 // Reset the tableChild value for datagrids, so that components have headers.
-                view += '<td>' + info.tableView(row[component.key] || '', component, $interpolate, componentInfo, false) + '</td>';
+                view += '<td>' + info.tableView((row && row[component.key]) || '', {
+                  component: component,
+                  $interpolate: options.$interpolate,
+                  componentInfo: options.componentInfo,
+                  tableChild: false,
+                  util: options.util
+                }) + '</td>';
               }
               else {
                 view += '<td>';
                 if (component.prefix) {
                   view += component.prefix;
                 }
-                view += row[component.key] || '';
+                view += (row && row[component.key]) || '';
                 if (component.suffix) {
                   view += ' ' + component.suffix;
                 }
@@ -53,11 +56,12 @@ module.exports = function(app) {
           return view;
         },
         settings: {
+          autofocus: false,
           input: true,
           tree: true,
           components: [],
           tableView: true,
-          label: '',
+          label: 'Data Grid',
           key: 'datagrid',
           protected: false,
           persistent: true,
@@ -96,8 +100,8 @@ module.exports = function(app) {
         }
       }
       // If more than maxLength, remove extra rows.
-      if ($scope.component.validate && $scope.component.validate.hasOwnProperty('maxLength') && $scope.rows.length < $scope.component.validate.maxLength) {
-        $scope.rows = $scope.rows.slice(0, $scope.component.validate.maxLength);
+      if ($scope.component.validate && $scope.component.validate.hasOwnProperty('maxLength') && $scope.rows.length > $scope.component.validate.maxLength) {
+        $scope.rows.splice($scope.component.validate.maxLength);
       }
       $scope.cols = $scope.component.components;
       $scope.localKeys = $scope.component.components.map(function(component) {

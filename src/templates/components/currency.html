@@ -1,16 +1,19 @@
 <input
-  type="{{ component.inputType }}"
+  type="text"
+  inputmode="numeric"
   class="form-control"
   id="{{ componentId }}"
   name="{{ componentId }}"
   tabindex="{{ component.tabindex || 0 }}"
   ng-model="data[component.key]"
+  ng-model-options="{allowInvalid: true}"
   ng-required="isRequired(component)"
   ng-disabled="readOnly"
   safe-multiple-to-single
+  auto-focus="true"
+  aria-labelledby="{{ componentId +'Label'}}"
+  aria-describedby="{{componentId + 'Desc'}}"
   ng-attr-placeholder="{{ component.placeholder }}"
   custom-validator="component.validate.custom"
-  currency-input
-  ui-mask-placeholder=""
-  ui-options="uiMaskOptions"
+  formio-mask="currency"
 >

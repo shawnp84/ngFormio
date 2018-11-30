@@ -1,4 +1,5 @@
 var fs = require('fs');
+var _merge = require('lodash/merge');
 module.exports = function(app) {
   app.config([
     'formioComponentsProvider',
@@ -7,6 +8,7 @@ module.exports = function(app) {
         title: 'Button',
         template: 'formio/components/button.html',
         settings: {
+          autofocus: false,
           input: true,
           label: 'Submit',
           tableView: false,
@@ -19,38 +21,49 @@ module.exports = function(app) {
           disableOnInvalid: false,
           theme: 'primary'
         },
-        controller: ['$scope', 'FormioUtils', function($scope, FormioUtils) {
+        controller: ['$scope', '$location', 'FormioUtils', function($scope, $location, FormioUtils) {
           if ($scope.options && $scope.options.building) return;
           var clicked = false;
           var settings = $scope.component;
           $scope.getButtonType = function() {
             switch (settings.action) {
               case 'submit':
+              case 'saveState':
                 return 'submit';
               case 'reset':
                 return 'reset';
               case 'event':
               case 'custom':
               case 'oauth':
+              case 'url':
+              case 'delete':
               default:
                 return 'button';
             }
           };
 
           $scope.hasError = function() {
-            return clicked && (settings.action === 'submit') && $scope.formioForm.$invalid && !$scope.formioForm.$pristine;
+            if (clicked && (settings.action === 'submit') && $scope.formioForm.$invalid) {
+              $scope.disableBtn = true;
+              return true;
+            }
+            else {
+              clicked = false;
+              $scope.disableBtn = false;
+              return false;
+            }
           };
 
           var onCustom = function() {
             try {
-              /* eslint-disable no-unused-vars */
               var parent = $scope.$parent;
               while (!parent.form) {
                 parent = parent.$parent;
               }
-              var components = FormioUtils.flattenComponents(parent.form.components, true);
-              /* eslint-enable no-unused-vars */
-              eval('(function(data) { ' + $scope.component.custom + ' })($scope.data)');
+              var flattened = FormioUtils.flattenComponents(parent.form.components, true);
+              var components = flattened;
+              (new Function('form', 'flattened', 'components', '_merge', '$scope', 'data', 'row', $scope.component.custom.toString()))
+              (parent.form, flattened, components, _merge, $scope, $scope.data, $scope.data);
             }
             catch (e) {
               /* eslint-disable no-console */
@@ -61,8 +74,14 @@ module.exports = function(app) {
 
           var onClick = function() {
             clicked = true;
+
+            $scope.data[$scope.component.key] = true;
             switch (settings.action) {
               case 'submit':
+                $scope.submission.state = 'submitted';
+                return;
+              case 'saveState':
+                $scope.submission.state = $scope.component.state;
                 return;
               case 'event':
                 $scope.$emit($scope.component.event, $scope.data);
@@ -70,8 +89,14 @@ module.exports = function(app) {
               case 'custom':
                 onCustom();
                 break;
+              case 'url':
+                $scope.$emit('submitUrl',{url:$scope.component.url, component: $scope.component});
+                break;
               case 'reset':
                 $scope.resetForm();
+                break;
+              case 'delete':
+                $scope.deleteSubmission();
                 break;
               case 'oauth':
                 if (!settings.oauth) {
@@ -183,6 +208,16 @@ module.exports = function(app) {
               }
             }, 100);
           };
+
+          // If this is an OpenID Provider initiated login, perform the click event immediately
+          if (
+            settings.action === 'oauth' &&
+            settings.oauth &&
+            settings.oauth.authURI &&
+            settings.oauth.authURI.indexOf($location.search().iss) === 0
+          ) {
+            $scope.openOAuth(settings.oauth);
+          }
         }],
         viewTemplate: 'formio/componentsView/button.html'
       });

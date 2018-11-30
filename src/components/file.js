@@ -7,7 +7,16 @@ module.exports = function(app) {
         title: 'File',
         template: 'formio/components/file.html',
         group: 'advanced',
+        tableView: function(data, options) {
+          if (!data || data.length === 0) {
+            return '';
+          }
+
+          data = options.component.multiple ? data : data[0];
+          return '<a href="' + data.url + '" target="_blank">' + data.originalName + '</a>';
+        },
         settings: {
+          autofocus: false,
           input: true,
           tableView: true,
           label: '',
@@ -20,8 +29,26 @@ module.exports = function(app) {
           protected: false,
           persistent: true,
           hidden: false,
-          clearOnHide: true
+          clearOnHide: true,
+          filePattern: '*',
+          fileMinSize: '0KB',
+          fileMaxSize: '1GB'
         },
+        controller: [
+          '$scope',
+          '$timeout',
+          function(
+            $scope,
+            $timeout
+          ) {
+            if ($scope.options && $scope.options.building) return;
+            if ($scope.component.autofocus) {
+              $timeout(function() {
+                angular.element('#' + $scope.component.key + '-browse')[0].focus();
+              });
+            }
+          }
+        ],
         viewTemplate: 'formio/componentsView/file.html'
       });
     }
@@ -94,7 +121,7 @@ module.exports = function(app) {
         file: '=',
         form: '='
       },
-      template: '<a href="{{ file.url }}" ng-click="getFile($event)" target="_blank">{{ file.name }}</a>',
+      template: '<a href="{{ file.url }}" ng-click="getFile($event)" target="_blank">{{ file.originalName || file.name }}</a>',
       controller: [
         '$window',
         '$rootScope',
@@ -111,7 +138,7 @@ module.exports = function(app) {
             evt.preventDefault();
             $scope.form = $scope.form || $rootScope.filePath;
             $scope.options = $scope.options || {};
-            var baseUrl = $scope.options.baseUrl || Formio.getBaseUrl();
+            var baseUrl = Formio.setScopeBase($scope);
             var formio = new Formio($scope.form, {base: baseUrl});
             formio
               .downloadFile($scope.file).then(function(file) {
@@ -139,7 +166,7 @@ module.exports = function(app) {
         form: '=',
         width: '='
       },
-      template: '<img ng-src="{{ file.imageSrc }}" alt="{{ file.name }}" ng-style="{width: width}" />',
+      template: '<img ng-src="{{ file.imageSrc }}" alt="{{ file.originalName || file.name }}" ng-style="{width: width}" />',
       controller: [
         '$rootScope',
         '$scope',
@@ -152,7 +179,7 @@ module.exports = function(app) {
           if ($scope.options && $scope.options.building) return;
           $scope.form = $scope.form || $rootScope.filePath;
           $scope.options = $scope.options || {};
-          var baseUrl = $scope.options.baseUrl || Formio.getBaseUrl();
+          var baseUrl = Formio.setScopeBase($scope);
           var formio = new Formio($scope.form, {base: baseUrl});
           formio.downloadFile($scope.file)
             .then(function(result) {
@@ -179,12 +206,68 @@ module.exports = function(app) {
         delete $scope.fileUploads[index];
       };
 
-      $scope.upload = function(files) {
+      // Defaults for unlimited components
+      if (!$scope.component.filePattern) {
+        $scope.component.filePattern = '*';
+      }
+      if (!$scope.component.fileMinSize) {
+        $scope.component.fileMinSize = '0KB';
+      }
+      if (!$scope.component.fileMaxSize) {
+        $scope.component.fileMaxSize = '1GB';
+      }
+
+      $scope.$watch('data.' + $scope.component.key, function(value) {
+        // For some reason required validation doesn't fire properly after removing an item from an array which results
+        // in an empty array that is marked as valid. Fix by removing the empty array.
+        if (Array.isArray(value) && value.length === 0) {
+          delete $scope.data[$scope.component.key];
+        }
+      }, true);
+
+      $scope.browseKeyPress = function($event) {
+        if ($event.key === 'Enter') {
+          angular.element('#' + $scope.component.key + '-browse').triggerHandler('click');
+        }
+      };
+
+      $scope.invalidFiles = [];
+      $scope.currentErrors = [];
+      $scope.upload = function(files, invalidFiles) {
+        if (invalidFiles.length) {
+          angular.forEach(invalidFiles, function(fileError) {
+            if (fileError.$error === 'pattern') {
+              fileError.$error = 'custom';
+              $scope.component.customError = 'File extension does not match the pattern ' + $scope.component.filePattern;
+            }
+            if (fileError.$error === 'maxSize') {
+              fileError.$error = 'custom';
+              $scope.component.customError = 'File size is larger than the allowed ' + $scope.component.fileMaxSize;
+            }
+            if (fileError.$error === 'minSize') {
+              fileError.$error = 'custom';
+              $scope.component.customError = 'File size is smaller than the allowed ' + $scope.component.fileMinSize;
+            }
+
+            $scope.currentErrors.push(fileError.$error);
+            $scope.formioForm[$scope.componentId].$setValidity(fileError.$error, false);
+            $scope.formioForm[$scope.componentId].$setDirty();
+          });
+          return;
+        }
+        else {
+          angular.forEach($scope.currentErrors, function(err) {
+            $scope.formioForm[$scope.componentId].$setValidity(err, true);
+          });
+          $scope.currentErrors = [];
+        }
+
         if ($scope.component.storage && files && files.length) {
           angular.forEach(files, function(file) {
             // Get a unique name for this file to keep file collisions from occurring.
             var fileName = FormioUtils.uniqueName(file.name);
             $scope.fileUploads[fileName] = {
+              originalName: file.name,
               name: fileName,
               size: file.size,
               status: 'info',
@@ -192,14 +275,7 @@ module.exports = function(app) {
             };
             var dir = $scope.component.dir || '';
             dir = $interpolate(dir)({data: $scope.data, row: $scope.row});
-            var formio = null;
-            if ($scope.formio) {
-              formio = $scope.formio;
-            }
-            else {
-              $scope.fileUploads[fileName].status = 'error';
-              $scope.fileUploads[fileName].message = 'File Upload URL not provided.';
-            }
+            var formio = $scope.formio || new Formio();
 
             if (formio) {
               formio.uploadFile($scope.component.storage, file, fileName, dir, function processNotify(evt) {
@@ -209,6 +285,9 @@ module.exports = function(app) {
                 $scope.$apply();
               }, $scope.component.url)
                 .then(function(fileInfo) {
+                  // Attach the original file name back to the file info.
+                  fileInfo.originalName = file.name;
+
                   delete $scope.fileUploads[fileName];
                   // This fixes new fields having an empty space in the array.
                   if ($scope.data && $scope.data[$scope.component.key] === '') {

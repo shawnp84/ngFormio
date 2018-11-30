@@ -4,10 +4,10 @@ module.exports = function() {
     replace: true,
     scope: false,
     template: '<i ng-if="component.tooltip"' +
-    ' class="glyphicon glyphicon-question-sign text-muted"' +
-    ' uib-popover="{{ component.tooltip }}"' +
-    ' popover-trigger="\'mouseenter\'"' +
-    ' popover-placement="right"' +
-    ' popover-popup-close-delay="100"></i>'
+    ' class="glyphicon glyphicon-question-sign"' +
+    ' ng-class="{ \'text-muted\': component.type !== \'button\' }"' +
+    ' uib-tooltip="{{ component.tooltip }}"' +
+    ' tooltip-placement="right"' +
+    ' tooltip-popup-close-delay="100" id="{{component.key+\'Desc\'}}"></i>'
   };
 };

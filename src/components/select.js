@@ -5,6 +5,8 @@ var _isEqual = require('lodash/isEqual');
 var _assign = require('lodash/assign');
 var _set = require('lodash/set');
 var _cloneDeep = require('lodash/cloneDeep');
+var _mapValues = require('lodash/mapValues');
+var _isNil = require('lodash/isNil');
 module.exports = function(app) {
   app.directive('formioSelectItem', [
     '$compile',
@@ -39,34 +41,6 @@ module.exports = function(app) {
     };
   });
 
-  // A directive to have ui-select open on focus
-  app.directive('uiSelectOpenOnFocus', [function() {
-    return {
-      require: 'uiSelect',
-      restrict: 'A',
-      link: function($scope, el, attrs, uiSelect) {
-        if ($scope.options && $scope.options.building) return;
-        var focuscount = -1;
-
-        angular.element(uiSelect.focusser).on('focus', function() {
-          if (focuscount-- < 0) {
-            uiSelect.activate();
-          }
-        });
-
-        // Disable the auto open when this select element has been activated.
-        $scope.$on('uis:activate', function() {
-          focuscount = 1;
-        });
-
-        // Re-enable the auto open after the select element has been closed
-        $scope.$on('uis:close', function() {
-          focuscount = 1;
-        });
-      }
-    };
-  }]);
-
   // Configure the Select component.
   app.config([
     'formioComponentsProvider',
@@ -76,27 +50,27 @@ module.exports = function(app) {
         template: function($scope) {
           return $scope.component.multiple ? 'formio/components/select-multiple.html' : 'formio/components/select.html';
         },
-        tableView: function(data, component, $interpolate) {
+        tableView: function(data, options) {
           var getItem = function(data) {
-            switch (component.dataSrc) {
+            switch (options.component.dataSrc) {
               case 'values':
-                component.data.values.forEach(function(item) {
+                options.component.data.values.forEach(function(item) {
                   if (item.value === data) {
                     data = item;
                   }
                 });
                 return data;
               case 'json':
-                if (component.valueProperty) {
+                if (options.component.valueProperty) {
                   var selectItems;
                   try {
-                    selectItems = angular.fromJson(component.data.json);
+                    selectItems = angular.fromJson(options.component.data.json);
                   }
                   catch (error) {
                     selectItems = [];
                   }
                   selectItems.forEach(function(item) {
-                    if (item[component.valueProperty] === data) {
+                    if (item[options.component.valueProperty] === data) {
                       data = item;
                     }
                   });
@@ -109,11 +83,11 @@ module.exports = function(app) {
                 return data;
             }
           };
-          if (component.multiple && Array.isArray(data)) {
+          if (options.component.multiple && Array.isArray(data)) {
             return data.map(getItem).reduce(function(prev, item) {
               var value;
               if (typeof item === 'object') {
-                value = $interpolate(component.template)({item: item});
+                value = options.$interpolate(options.component.template)({item: item});
               }
               else {
                 value = item;
@@ -125,7 +99,7 @@ module.exports = function(app) {
             var item = getItem(data);
             var value;
             if (typeof item === 'object') {
-              value = $interpolate(component.template)({item: item});
+              value = options.$interpolate(options.component.template)({item: item});
             }
             else {
               value = item;
@@ -160,6 +134,13 @@ module.exports = function(app) {
             $scope.hasNextPage = false;
             $scope.selectItems = [];
 
+            if (settings.autofocus) {
+              $timeout(function() {
+                var inputs = angular.element('#form-group-' + settings.key).find('input');
+                inputs[settings.multiple ? 0 : 1].focus();
+              });
+            }
+
             var initialized = $q.defer();
             initialized.promise.then(function() {
               $scope.$emit('selectLoaded', $scope.component);
@@ -192,6 +173,12 @@ module.exports = function(app) {
               $scope.refreshItems(input, url);
             });
 
+            $scope.clearSelected = function(event) {
+              event.stopPropagation();
+              event.preventDefault();
+              delete $scope.data[$scope.component.key];
+            };
+
             var refreshing = false;
             var refreshValue = function() {
               if (refreshing) {
@@ -210,18 +197,26 @@ module.exports = function(app) {
               else {
                 refreshing = false;
                 $scope.$emit('selectLoaded', $scope.component);
+                var index = $scope.selectItems.indexOf(tempData);
+                if (index !== -1) {
+                  $scope.selectItems.splice(index, 1);
+                }
               }
             };
 
             // Ensures that the value is within the select items.
-            var ensureValue = function() {
-              var value = $scope.data[settings.key];
-              if (!value || (Array.isArray(value) && value.length === 0)) {
+            var ensureValue = function(value) {
+              value = _isNil(value) ? $scope.data[settings.key] : value;
+              if (_isNil(value) || (Array.isArray(value) && value.length === 0)) {
+                return;
+              }
+              if (Array.isArray(value)) {
+                value.forEach(ensureValue);
                 return;
               }
               // Iterate through the list of items and see if our value exists...
               var found = false;
-              for (var i=0; i < $scope.selectItems.length; i++) {
+              for (var i = 0; i < $scope.selectItems.length; i++) {
                 var item = $scope.selectItems[i];
                 var selectItem = $scope.getSelectItem(item);
                 if (_isEqual(selectItem, value)) {
@@ -288,7 +283,7 @@ module.exports = function(app) {
                 // Set the new result.
                 var setResult = function(data, append) {
                   // coerce the data into an array.
-                  if (!(data instanceof Array)) {
+                  if (!Array.isArray(data)) {
                     data = [data];
                   }
 
@@ -353,8 +348,9 @@ module.exports = function(app) {
                       var value = $interpolate($scope.component.template)({item: item}).replace(/<(?:.|\n)*?>/gm, '');
                       switch ($scope.component.filter) {
                         case 'startsWith':
-                          return value.toLowerCase().indexOf(input.toLowerCase()) !== -1;
+                          return value.toLowerCase().lastIndexOf(input.toLowerCase(), 0) === 0;
                         case 'contains':
+                          return value.toLowerCase().indexOf(input.toLowerCase()) !== -1;
                         default:
                           return value.toLowerCase().lastIndexOf(input.toLowerCase(), 0) === 0;
                       }
@@ -392,8 +388,7 @@ module.exports = function(app) {
                 }
                 $scope.options = $scope.options || {};
                 var url = '';
-                var baseUrl = $scope.options.baseUrl || Formio.getBaseUrl();
-                //var baseUrl = Formio.getBaseUrl();
+                var baseUrl = Formio.setScopeBase($scope);
                 if (settings.dataSrc === 'url') {
                   url = settings.data.url;
                   if (url.substr(0, 1) === '/') {
@@ -415,7 +410,10 @@ module.exports = function(app) {
                 else {
                   url = baseUrl;
                   if (settings.data.project) {
-                    url += '/project/' + settings.data.project;
+                    if (settings.data.project.match(/^[0-9a-fA-F]{24}$/)) {
+                      url += '/project';
+                    }
+                    url += '/' + settings.data.project;
                   }
                   url += '/form/' + settings.data.resource + '/submission';
                 }
@@ -475,7 +473,7 @@ module.exports = function(app) {
                     // Add the other filter.
                     if (settings.filter) {
                       // This changes 'a=b&c=d' into an object and assigns to params.
-                      _assign(options.params, _.mapValues(JSON.parse('{"' + decodeURI(settings.filter).replace(/"/g, '\\"').replace(/&/g, '","').replace(/=/g,'":"') + '"}'), function(value) {
+                      _assign(options.params, _mapValues(JSON.parse('{"' + decodeURI(settings.filter).replace(/"/g, '\\"').replace(/&/g, '","').replace(/=/g,'":"') + '"}'), function(value) {
                         return $interpolate(value)({
                           data: $scope.submission ? $scope.submission.data : {},
                           row: $scope.data
@@ -491,7 +489,7 @@ module.exports = function(app) {
                     // Set the new result.
                     var setResult = function(data) {
                       // coerce the data into an array.
-                      if (!(data instanceof Array)) {
+                      if (!Array.isArray(data)) {
                         data = [data];
                       }
 
@@ -505,7 +503,7 @@ module.exports = function(app) {
                         $scope.selectItems = $scope.selectItems.concat(data);
                       }
                       else {
-                        $scope.selectItems = data;
+                        $scope.selectItems = _cloneDeep(data);
                       }
 
                       // Ensure the value is set to what it should be set to.
@@ -514,7 +512,7 @@ module.exports = function(app) {
 
                     var promise;
                     if (settings.dataSrc === 'resource') {
-                      promise = (new Formio(newUrl)).loadSubmissions(options);
+                      promise = (new Formio(newUrl, {base: baseUrl})).loadSubmissions(options);
                     }
                     else {
                       // Add in headers if specified
@@ -571,10 +569,11 @@ module.exports = function(app) {
           }
         ],
         settings: {
+          autofocus: false,
           input: true,
           tableView: true,
-          label: '',
-          key: 'selectField',
+          label: 'Select',
+          key: 'select',
           placeholder: '',
           data: {
             values: [],

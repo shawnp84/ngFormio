@@ -1,5 +1,19 @@
 var fs = require('fs');
 module.exports = function(app) {
+  app.directive('formioCkeditor', function() {
+    return {
+      restrict: 'A',
+      require: ['ckeditor', 'ngModel'],
+      link: function(scope, element, attr, ctrl) {
+        var ngModelCtrl= ctrl[1];
+
+        // FOR-975 - overwrite CKEditor default values
+        ngModelCtrl.$viewValue = undefined;
+        ngModelCtrl.$$lastCommittedViewValue = undefined;
+        ngModelCtrl.$setPristine(true);
+      }
+    };
+  });
   app.config([
     'formioComponentsProvider',
     function(formioComponentsProvider) {
@@ -31,9 +45,8 @@ module.exports = function(app) {
             if ($scope.component.wysiwyg === true) {
               $scope.component.wysiwyg = defaults;
             }
-            else {
-              $scope.component.wysiwyg = angular.extend(defaults, $scope.component.wysiwyg);
-            }
+
+            $scope.component.wysiwyg.disableNativeSpellChecker = !$scope.component.spellcheck;
             return 'formio/components/texteditor.html';
           }
           if ($scope.readOnly && $scope.component.wysiwyg) {
@@ -75,10 +88,11 @@ module.exports = function(app) {
           }
         ],
         settings: {
+          autofocus: false,
           input: true,
           tableView: true,
-          label: '',
-          key: 'textareaField',
+          label: 'Text Area',
+          key: 'textarea',
           placeholder: '',
           prefix: '',
           suffix: '',
@@ -90,6 +104,7 @@ module.exports = function(app) {
           hidden: false,
           wysiwyg: false,
           clearOnHide: true,
+          spellcheck: true,
           validate: {
             required: false,
             minLength: '',

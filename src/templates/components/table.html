@@ -1,4 +1,4 @@
-<div class="table-responsive" id="{{ component.key }}">
+<div class="table-responsive" id="formio-table-{{ component.key }}">
   <table ng-class="{'table-striped': component.striped, 'table-bordered': component.bordered, 'table-hover': component.hover, 'table-condensed': component.condensed}" class="table">
     <thead ng-if="component.header.length">
       <th ng-repeat="header in component.header track by $index">{{ header | formioTranslate:null:options.building }}</th>
@@ -14,7 +14,7 @@
             submission="submission"
             hide-components="hideComponents"
             ng-if="options.building ? '::true' : isVisible(_component, data)"
-            formio-form="formioForm"
+            form-name="formName"
             read-only="isDisabled(_component, data)"
             grid-row="gridRow"
             grid-col="gridCol"

@@ -1,5 +1,5 @@
 var fs = require('fs');
-var formioUtils = require('formiojs/utils');
+var formioUtils = require('formiojs/utils').default;
 
 module.exports = function(app) {
   app.config([
@@ -9,12 +9,12 @@ module.exports = function(app) {
         title: 'Edit Grid',
         template: 'formio/components/editgrid.html',
         group: 'advanced',
-        tableView: function(data, component, $interpolate, componentInfo, tableChild) {
+        tableView: function(data, options) {
           var view = '<table class="table table-striped table-bordered table-child">';
 
-          if (!tableChild) {
+          if (!options.tableChild) {
             view += '<thead><tr>';
-            angular.forEach(component.components, function(component) {
+            angular.forEach(options.component.components, function(component) {
               view += '<th>' + (component.label || '') + ' (' + component.key + ')</th>';
             });
             view += '</tr></thead>';
@@ -23,24 +23,32 @@ module.exports = function(app) {
           view += '<tbody>';
           angular.forEach(data, function(row) {
             view += '<tr>';
-            formioUtils.eachComponent(component.components, function(component) {
+            formioUtils.eachComponent(options.component.components, function(component) {
               // Don't render disabled fields, or fields with undefined data.
-              if (!component.tableView || row[component.key] === undefined) {
+              if (!component.tableView || !row || row[component.key] === undefined) {
                 return;
               }
 
               // If the component has a defined tableView, use that, otherwise try and use the raw data as a string.
-              var info = componentInfo.components.hasOwnProperty(component.type) ? componentInfo.components[component.type] : {};
+              var info = options.componentInfo.components.hasOwnProperty(component.type)
+                ? options.componentInfo.components[component.type]
+                : {};
               if (info.tableView) {
                 // Reset the tableChild value for datagrids, so that components have headers.
-                view += '<td>' + info.tableView(row[component.key] || '', component, $interpolate, componentInfo, false) + '</td>';
+                view += '<td>' + info.tableView((row && row[component.key]) || '', {
+                  component: component,
+                  $interpolate: options.$interpolate,
+                  componentInfo: options.componentInfo,
+                  tableChild: false,
+                  util: options.util
+                }) + '</td>';
               }
               else {
                 view += '<td>';
                 if (component.prefix) {
                   view += component.prefix;
                 }
-                view += row[component.key] || '';
+                view += (row && row[component.key]) || '';
                 if (component.suffix) {
                   view += ' ' + component.suffix;
                 }
@@ -56,9 +64,9 @@ module.exports = function(app) {
           input: true,
           tree: true,
           components: [],
-          multiple: true,
+          multiple: false,
           tableView: true,
-          label: '',
+          label: 'Edit Grid',
           key: 'editgrid',
           protected: false,
           persistent: true,
@@ -77,7 +85,7 @@ module.exports = function(app) {
               '<div class="row"> \n' +
               '  {%util.eachComponent(components, function(component) { %} \n' +
               '    <div class="col-sm-2"> \n' +
-              '      {{ row[component.key] }} \n' +
+              '      {{ getView(component, row[component.key]) }} \n' +
               '    </div> \n' +
               '  {% }) %} \n' +
               '  <div class="col-sm-2"> \n' +
@@ -98,7 +106,7 @@ module.exports = function(app) {
       require: 'ngModel',
       restrict: 'A',
       link: function(scope, elem, attr, ctrl) {
-        if (scope.options && scope.options.building) return;
+        if (scope.options && scope.options.building || !scope.formioForm) return;
 
         // Add the control to the main form.
         scope.formioForm.$addControl(ctrl);
@@ -163,6 +171,7 @@ module.exports = function(app) {
             var row = scope.row;
             /*eslint-enable no-unused-vars */
 
+            var component = scope.component;
             var custom = scope.component.validate.row;
             custom = custom.replace(/({{\s{0,}(.*[^\s]){1}\s{0,}}})/g, function(match, $1, $2) {
               return _get(scope.submission.data, $2);
@@ -219,15 +228,47 @@ module.exports = function(app) {
       scope: false,
       controller: [
         '$scope',
+        '$interpolate',
+        'formioComponents',
+        'FormioUtils',
         function(
-          $scope
+          $scope,
+          $interpolate,
+          formioComponents,
+          FormioUtils
         ) {
           $scope.$watchCollection('rows', function() {
             $scope.rowData = angular.copy($scope.rows[$scope.rowIndex]);
             $scope.templateData = {
+              data: $scope.submission.data,
               row: $scope.rowData,
               rowIndex: $scope.rowIndex,
               components: $scope.component.components,
+              getView: function(component, data) {
+                var info = formioComponents.components[component.type] || {};
+                if (info.tableView) {
+                  return info.tableView(data || '', {
+                    component: component,
+                    $interpolate: $interpolate,
+                    componentInfo: formioComponents,
+                    tableChild: false,
+                    util: FormioUtils
+                  });
+                }
+                else {
+                  var view = '';
+
+                  if (component.prefix) {
+                    view += component.prefix;
+                  }
+                  view += data || '';
+                  if (component.suffix) {
+                    view += ' ' + component.suffix;
+                  }
+
+                  return view;
+                }
+              },
               util: formioUtils
             };
           });
@@ -246,6 +287,7 @@ module.exports = function(app) {
             }
             $scope.rows[$scope.rowIndex] = $scope.rowData;
             $scope.openRows.splice($scope.openRows.indexOf($scope.rowIndex), 1);
+            $scope.formioForm[$scope.componentId].$validate();
           }
 
           var editRow = function() {
@@ -281,12 +323,11 @@ module.exports = function(app) {
       '            ng-init="colIndex = $index"' +
       '            component="col"' +
       '            data="rowData"' +
-      '            formio-form="formioForm"' +
       '            formio="formio"' +
       '            submission="submission"' +
       '            hide-components="hideComponents"' +
       '            ng-if="options.building ? \'::true\' : isVisible(col, rowData)"' +
-      '            formio-form="formioForm"' +
+      '            form-name="formName"' +
       '            read-only="isDisabled(col, rowData)"' +
       '            grid-row="rowIndex"' +
       '            grid-col="colIndex"' +
@@ -295,7 +336,7 @@ module.exports = function(app) {
       '        </ng-form>' +
       '        <div class="editgrid-actions">' +
       '          <div ng-click="editDone(formioForm)" class="btn btn-primary">{{ component.saveRow || \'Save\' }}</div>' +
-      '          <div ng-if="component.removeRow" on-click="removeRow(rowIndex)" class="btn btn-danger">{{component.removeRow || \'Cancel\' }}</div>' +
+      '          <div ng-if="component.removeRow" ng-click="removeRow(rowIndex)" class="btn btn-danger">{{component.removeRow || \'Cancel\' }}</div>' +
       '        </div> ' +
       '      </div>' +
       '    </div>' +
@@ -318,7 +359,8 @@ module.exports = function(app) {
         $scope.headerData = {
           components: $scope.cols,
           value: $scope.data[$scope.component.key],
-          util: formioUtils
+          util: formioUtils,
+          data: $scope.data
         };
       }, true);
 
